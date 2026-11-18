@@ -3,7 +3,7 @@
 //   dip: close is 150 bps under the high of the last 120 closes. Take profit at 160 bps over
 //   cost, or stop at 180 bps under it. This is the trade that can make money on a down day.
 //   trend: close is 50 bps above the first close and within 20 bps of that same high. No fixed
-//   target; a 60 bp trail arms after 80 bps, and a 120 bp stop cuts a failed breakout.
+//   target; a 100 bp trail arms after 100 bps, and a 150 bp stop cuts a failed breakout.
 // Sells go out again while the reason still holds. Ten flat bars after a sell before the next buy.
 // Prices compare as integers. Floats are not used, so two runs on the same bars match.
 
