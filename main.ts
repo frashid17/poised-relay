@@ -1,38 +1,45 @@
-// Poised Relay: long-only cbBTC. A round trip costs roughly 26 bps, so one-minute noise is
-// skipped. Two entries, one position:
-//   dip: close is 150 bps under the high of the last 120 closes. Take profit at 160 bps over
-//   cost, or stop at 180 bps under it. This is the trade that can make money on a down day.
-//   trend: close is 50 bps above the first close and within 20 bps of that same high. No fixed
-//   target; a 100 bp trail arms after 100 bps, and a 150 bp stop cuts a failed breakout.
-// Sells go out again while the reason still holds. Ten flat bars after a sell before the next buy.
+// Poised Relay: long-only cbBTC on one-minute bars. A full-size round trip costs about 26 bps,
+// so the bot waits for a real washout, not one-minute noise.
+//
+// Entry: the low of the last 3 closes is at least 200 bps under the high of the last 180 closes,
+// and the latest close has bounced at least 5 bps off that low. Buy once history has 60 closes.
+// Exit: take profit arms at +120 bps over cost; after that a 25 bp trail from the peak close
+// sells the rebound. A hard stop at -80 bps cuts a failed bounce. After a sell, wait 30 flat
+// bars before the next buy.
 // Prices compare as integers. Floats are not used, so two runs on the same bars match.
 
 import { runBars, type Bar, type BarsState, type OrderInput } from './vendor/makefun-bars.ts';
 
-const LOOK = 120;
-const DIP_BPS = 150n;
-const DIP_TP_BPS = 160n;
-const DIP_STOP_BPS = 180n;
-const TREND_UP_BPS = 50n;
-const TREND_NEAR_BPS = 20n;
-const TREND_STOP_BPS = 150n;
-const TRAIL_ARM_BPS = 100n;
-const TRAIL_BPS = 100n;
-const COOLDOWN = 10;
-const MAX_SLIPPAGE_BPS = 200;
+const LOOK = 180;
+const DIP_BPS = 200n;
+const BOUNCE_BARS = 3;
+const BOUNCE_BPS = 5n;
+const TP_BPS = 120n;
+const STOP_BPS = 80n;
+const TRAIL_BPS = 25n;
+const MIN_HIST = 60;
+const COOLDOWN = 30;
+const MAX_SLIPPAGE_BPS = 250;
 const BPS = 10_000n;
 
 const closes: bigint[] = [];
 let symbol = 'CBBTC';
-let mode: 'dip' | 'trend' | null = null;
 let peak: bigint | null = null;
+let armed = false;
 let cool = 0;
 
-function rollHigh(): bigint {
+function rollHigh(n: number): bigint {
   let high = closes[closes.length - 1]!;
-  const from = Math.max(0, closes.length - LOOK);
+  const from = Math.max(0, closes.length - n);
   for (let i = from; i < closes.length; i++) if (closes[i]! > high) high = closes[i]!;
   return high;
+}
+
+function rollLow(n: number): bigint {
+  let low = closes[closes.length - 1]!;
+  const from = Math.max(0, closes.length - n);
+  for (let i = from; i < closes.length; i++) if (closes[i]! < low) low = closes[i]!;
+  return low;
 }
 
 function pushCloses(bars: readonly Bar[]): boolean {
@@ -46,15 +53,14 @@ function pushCloses(bars: readonly Bar[]): boolean {
 }
 
 function buy(state: BarsState): OrderInput[] {
-  if (cool > 0 || closes.length < 2) return [];
+  if (cool > 0 || closes.length < MIN_HIST) return [];
   const last = closes[closes.length - 1]!;
-  const high = rollHigh();
-  const first = closes[0]!;
-  const dip = last * BPS <= high * (BPS - DIP_BPS);
-  const trend = last * BPS >= first * (BPS + TREND_UP_BPS) && last * BPS >= high * (BPS - TREND_NEAR_BPS);
-  if (!dip && !trend) return [];
-  mode = dip ? 'dip' : 'trend';
+  const high = rollHigh(LOOK);
+  const low = rollLow(BOUNCE_BARS);
+  if (low * BPS > high * (BPS - DIP_BPS)) return [];
+  if (last * BPS < low * (BPS + BOUNCE_BPS)) return [];
   peak = null;
+  armed = false;
   const room = state.weightRoom(symbol);
   const spend = state.cash < room ? state.cash : room;
   if (spend < BigInt(state.hello.fees.min_notional_quote_units)) return [];
@@ -65,16 +71,11 @@ function sell(state: BarsState, qty: bigint, cost: bigint): OrderInput[] {
   const last = closes[closes.length - 1]!;
   if (peak === null || last > peak) peak = last;
   const value = state.value(symbol, qty);
-  if (mode === 'trend') {
-    const stopped = value * BPS <= cost * (BPS - TREND_STOP_BPS);
-    const armed = value * BPS >= cost * (BPS + TRAIL_ARM_BPS);
-    const trailed = armed && last * BPS <= peak * (BPS - TRAIL_BPS);
-    if (!stopped && !trailed) return [];
-  } else {
-    const target = value * BPS >= cost * (BPS + DIP_TP_BPS);
-    const stopped = value * BPS <= cost * (BPS - DIP_STOP_BPS);
-    if (!target && !stopped) return [];
-  }
+  if (value * BPS >= cost * (BPS + TP_BPS)) armed = true;
+  const stopped = value * BPS <= cost * (BPS - STOP_BPS);
+  const take = !armed && value * BPS >= cost * (BPS + TP_BPS);
+  const trailed = armed && last * BPS <= peak * (BPS - TRAIL_BPS);
+  if (!stopped && !take && !trailed) return [];
   cool = COOLDOWN;
   return [{ side: 'sell', symbol, qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
 }
@@ -88,8 +89,8 @@ await runBars({
     const held = state.positions.get(symbol);
     if (state.warmingUp) return [];
     if (!held) {
-      mode = null;
       peak = null;
+      armed = false;
       if (cool > 0) cool -= 1;
       if (!saw) return [];
       return buy(state);

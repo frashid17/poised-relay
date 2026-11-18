@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/btc-race-24h-20261118-1444/frashid17/poised-relay/rank.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
 [![reward](https://make.fun/badge/btc-race-24h-20261118-1444/frashid17/poised-relay/reward.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
 
-Long-only cbBTC bot for a one-minute bar replay. It buys a 150 bp dip from the last two hours, and it buys a breakout only after price is already 50 bp above the window's first close. One position, cash otherwise.
+Long-only cbBTC bot for a one-minute bar replay. It buys a washout: a 200 bp drop from the last three hours, then a bounce off the recent low, and it rides the rebound with a trailing exit. One position, cash otherwise.
 
 ## Run it
 
